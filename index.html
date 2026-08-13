@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon Survivor</title>
+<style>
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#080b14;color:#fff;font-family:Arial,sans-serif}
+  canvas{display:block;width:100vw;height:100vh;cursor:crosshair}
+  #help{position:fixed;left:18px;bottom:14px;color:#aab5d6;font-size:14px;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="help">WASD = bewegen · Maus = zielen · Linksklick = schießen · R = Neustart</div>
+<script>
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+let W,H,dpr;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=W*dpr;canvas.height=H*dpr;ctx.setTransform(dpr,0,0,dpr,0,0)}
+addEventListener("resize",resize); resize();
+
+const keys={}, mouse={x:W/2,y:H/2,down:false};
+addEventListener("keydown",e=>{keys[e.key.toLowerCase()]=true;if(e.key.toLowerCase()==="r"&&gameOver)reset()});
+addEventListener("keyup",e=>keys[e.key.toLowerCase()]=false);
+canvas.addEventListener("mousemove",e=>{mouse.x=e.clientX;mouse.y=e.clientY});
+canvas.addEventListener("mousedown",e=>{if(e.button===0){mouse.down=true;if(gameOver)reset()}});
+addEventListener("mouseup",e=>{if(e.button===0)mouse.down=false});
+
+let player,bullets,enemies,particles,score,wave,spawnTimer,shootTimer,gameOver,last;
+function reset(){
+ player={x:W/2,y:H/2,r:16,speed:260,hp:100,flash:0};
+ bullets=[];enemies=[];particles=[];score=0;wave=1;spawnTimer=0;shootTimer=0;gameOver=false;last=performance.now();
+}
+function spawnEnemy(){
+ const side=Math.floor(Math.random()*4), m=35;
+ let x,y;
+ if(side===0){x=-m;y=Math.random()*H}else if(side===1){x=W+m;y=Math.random()*H}
+ else if(side===2){x=Math.random()*W;y=-m}else{x=Math.random()*W;y=H+m}
+ const r=13+Math.random()*10;
+ enemies.push({x,y,r,speed:55+wave*5+Math.random()*35,hp:1+Math.floor(wave/5),hit:0});
+}
+function shoot(){
+ const a=Math.atan2(mouse.y-player.y,mouse.x-player.x);
+ bullets.push({x:player.x+Math.cos(a)*20,y:player.y+Math.sin(a)*20,
+   vx:Math.cos(a)*650,vy:Math.sin(a)*650,r:4,life:1});
+}
+function burst(x,y,n=8){
+ for(let i=0;i<n;i++){let a=Math.random()*Math.PI*2,s=40+Math.random()*130;
+  particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:.35+Math.random()*.35,r:2+Math.random()*3});
+ }
+}
+function update(dt){
+ if(gameOver)return;
+ let dx=(keys.d?1:0)-(keys.a?1:0),dy=(keys.s?1:0)-(keys.w?1:0);
+ if(dx||dy){let l=Math.hypot(dx,dy);player.x+=dx/l*player.speed*dt;player.y+=dy/l*player.speed*dt}
+ player.x=Math.max(player.r,Math.min(W-player.r,player.x));player.y=Math.max(player.r,Math.min(H-player.r,player.y));
+ player.flash=Math.max(0,player.flash-dt);
+
+ shootTimer-=dt;
+ if(mouse.down&&shootTimer<=0){shoot();shootTimer=.11}
+ spawnTimer-=dt;
+ if(spawnTimer<=0){spawnEnemy();spawnTimer=Math.max(.18, .9-wave*.025)}
+ score+=dt*2; wave=1+Math.floor(score/100);
+
+ for(const b of bullets){b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt}
+ bullets=bullets.filter(b=>b.life>0&&b.x>-30&&b.x<W+30&&b.y>-30&&b.y<H+30);
+
+ for(const e of enemies){
+   let a=Math.atan2(player.y-e.y,player.x-e.x);
+   e.x+=Math.cos(a)*e.speed*dt;e.y+=Math.sin(a)*e.speed*dt;e.hit=Math.max(0,e.hit-dt);
+   if(Math.hypot(player.x-e.x,player.y-e.y)<player.r+e.r){
+     player.hp-=28*dt;player.flash=.08;
+     if(player.hp<=0){player.hp=0;gameOver=true;burst(player.x,player.y,30)}
+   }
+ }
+ for(let i=enemies.length-1;i>=0;i--){
+   let e=enemies[i],dead=false;
+   for(let j=bullets.length-1;j>=0;j--){
+     let b=bullets[j];
+     if(Math.hypot(e.x-b.x,e.y-b.y)<e.r+b.r){
+       e.hp--; e.hit=.08; bullets.splice(j,1); burst(b.x,b.y,4);
+       if(e.hp<=0){score+=12;burst(e.x,e.y,12);dead=true}
+       break;
+     }
+   }
+   if(dead)enemies.splice(i,1);
+ }
+ for(const p of particles){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;p.vx*=.97;p.vy*=.97}
+ particles=particles.filter(p=>p.life>0);
+}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ // grid
+ ctx.fillStyle="#080b14";ctx.fillRect(0,0,W,H);
+ ctx.strokeStyle="rgba(70,90,150,.12)";ctx.lineWidth=1;
+ const grid=40;
+ for(let x=0;x<W;x+=grid){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke()}
+ for(let y=0;y<H;y+=grid){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke()}
+
+ for(const p of particles){ctx.globalAlpha=Math.max(0,p.life*2);ctx.fillStyle="#69e6ff";ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1}
+ for(const b of bullets){ctx.fillStyle="#fff";ctx.shadowBlur=14;ctx.shadowColor="#5ee7ff";ctx.beginPath();ctx.arc(b.x,b.y,b.r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0}
+ for(const e of enemies){
+   ctx.fillStyle=e.hit?"#fff":"#ff416c";ctx.shadowBlur=16;ctx.shadowColor="#ff174f";
+   ctx.beginPath();ctx.arc(e.x,e.y,e.r,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
+   ctx.fillStyle="#240914";ctx.beginPath();ctx.arc(e.x,e.y,e.r*.35,0,Math.PI*2);ctx.fill();
+ }
+ // player
+ const ang=Math.atan2(mouse.y-player.y,mouse.x-player.x);
+ ctx.save();ctx.translate(player.x,player.y);ctx.rotate(ang);
+ ctx.fillStyle=player.flash?"#fff":"#54d9ff";ctx.shadowBlur=22;ctx.shadowColor="#31c8ff";
+ ctx.beginPath();ctx.moveTo(22,0);ctx.lineTo(-13,-12);ctx.lineTo(-8,0);ctx.lineTo(-13,12);ctx.closePath();ctx.fill();ctx.restore();ctx.shadowBlur=0;
+
+ ctx.fillStyle="#fff";ctx.font="bold 22px Arial";ctx.fillText("NEON SURVIVOR",18,34);
+ ctx.font="16px Arial";ctx.fillStyle="#cbd5ff";ctx.fillText("Punkte: "+Math.floor(score),18,60);ctx.fillText("Welle: "+wave,18,82);
+ // HP
+ ctx.fillStyle="#252b42";ctx.fillRect(18,96,220,14);ctx.fillStyle="#46e68a";ctx.fillRect(18,96,220*(player.hp/100),14);
+ ctx.strokeStyle="#fff";ctx.strokeRect(18,96,220,14);
+
+ if(gameOver){
+   ctx.fillStyle="rgba(0,0,0,.65)";ctx.fillRect(0,0,W,H);
+   ctx.textAlign="center";ctx.fillStyle="#fff";ctx.font="bold 54px Arial";ctx.fillText("GAME OVER",W/2,H/2-35);
+   ctx.font="22px Arial";ctx.fillStyle="#bcd3ff";ctx.fillText("Punkte: "+Math.floor(score),W/2,H/2+5);
+   ctx.font="18px Arial";ctx.fillText("Klicke oder drücke R zum Neustart",W/2,H/2+45);ctx.textAlign="left";
+ }
+}
+function loop(t){let dt=Math.min((t-last)/1000,.033);last=t;update(dt);draw();requestAnimationFrame(loop)}
+reset();requestAnimationFrame(loop);
+</script>
+</body>
+</html>
